@@ -6,13 +6,26 @@ use Illuminate\Http\Request;
 use App\Models\Link;
 use App\Models\Tag;
 use App\Models\Category;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 
 class LinkController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Link::with(['category', 'tags'])->where('user_id', Auth::id());
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        
+        $query = Link::with(['category', 'tags'])
+            ->where(function($q) use ($user) {
+                if ($user->roles()->where('name', 'admin')->exists()) {
+                    return;
+                }
+                $q->where('user_id', $user->id)
+                  ->orWhereHas('sharedWith', function($sq) use ($user) {
+                      $sq->where('users.id', $user->id);
+                  });
+            });
 
         if ($request->filled('search')) {
             $query->where('title', 'like', '%' . $request->search . '%');
@@ -31,8 +44,9 @@ class LinkController extends Controller
         $links = $query->latest()->get();
         $categories = Category::all();
         $tags = Tag::all();
+        $users = User::where('id', '!=', $user->id)->get();
 
-        return view('links.index', compact('links', 'categories', 'tags'));
+        return view('links.index', compact('links', 'categories', 'tags', 'users'));
     }
 
     public function create()
@@ -53,7 +67,6 @@ class LinkController extends Controller
         ]);
 
         $data['user_id'] = Auth::id();
-
         $link = Link::create($data);
         $link->tags()->attach($request->tags);
 
@@ -62,7 +75,11 @@ class LinkController extends Controller
 
     public function show(Link $link)
     {
-        if ($link->user_id !== Auth::id()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $isShared = $link->sharedWith()->where('users.id', $user->id)->exists();
+
+        if ($link->user_id !== $user->id && !$isShared && !$user->roles()->where('name', 'admin')->exists()) {
             abort(403);
         }
 
@@ -72,7 +89,13 @@ class LinkController extends Controller
 
     public function edit(Link $link)
     {
-        if ($link->user_id !== Auth::id()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $canEdit = $link->user_id === $user->id || 
+                   $link->sharedWith()->where('users.id', $user->id)
+                        ->where('permission', 'edit')->exists();
+
+        if (!$canEdit && !$user->roles()->where('name', 'admin')->exists()) {
             abort(403);
         }
 
@@ -83,7 +106,13 @@ class LinkController extends Controller
 
     public function update(Request $request, Link $link)
     {
-        if ($link->user_id !== Auth::id()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $canEdit = $link->user_id === $user->id || 
+                   $link->sharedWith()->where('users.id', $user->id)
+                        ->where('permission', 'edit')->exists();
+
+        if (!$canEdit && !$user->roles()->where('name', 'admin')->exists()) {
             abort(403);
         }
 
@@ -103,30 +132,54 @@ class LinkController extends Controller
 
     public function destroy(Link $link)
     {
-        if ($link->user_id !== Auth::id()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        if ($link->user_id !== $user->id && !$user->roles()->where('name', 'admin')->exists()) {
             abort(403);
         }
 
         $link->delete();
         return redirect()->route('links.index')->with('success', 'Link deleted successfully');
     }
+
     public function forceDelete($id)
     {
-        if (Auth::user()->role !== 'admin') abort(403);
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        if (!$user->roles()->where('name', 'admin')->exists()) {
+            abort(403);
+        }
         
         $link = Link::withTrashed()->findOrFail($id);
         $link->forceDelete();
-        return back()->with('success', 'Supprimé définitivement');
+        return back()->with('success', 'Deleted permanently');
     }
+
     public function toggleFavorite(Link $link)
     {
-        /** @var User $user */
+        /** @var \App\Models\User $user */
         $user = Auth::user();
+        $user->favorites()->toggle($link->id);
+        return back()->with('success', 'Favorites updated');
+    }
 
-        if ($user) {
-            $user->favorites()->toggle($link->id);
+    public function share(Request $request, Link $link)
+    {
+        if ($link->user_id !== Auth::id()) {
+            abort(403);
         }
 
-        return back()->with('success', 'Favoris mis à jour');
+        $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'permission' => 'required|in:read,edit',
+        ]);
+
+        $link->sharedWith()->syncWithoutDetaching([
+            $request->user_id => ['permission' => $request->permission]
+        ]);
+
+        return back()->with('success', 'Link shared successfully');
     }
 }

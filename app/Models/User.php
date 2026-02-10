@@ -48,4 +48,14 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Link::class, 'favorites');
     }
+    public function hasRole($roleName)
+    {
+        return $this->roles()->where('name', $roleName)->exists();
+    }
+    public function sharedLinks()
+    {
+        return $this->belongsToMany(Link::class, 'link_user')
+                    ->withPivot('permission')
+                    ->withTimestamps();
+    }
 }

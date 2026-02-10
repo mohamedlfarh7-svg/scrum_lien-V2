@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('link_user', function (Blueprint $table) {
             $table->id();
             $table->foreignId('link_id')->constrained()->onDelete('cascade');
-            $table->foreignId('user_id')->constrained()->onDelete('cascade'); // المستخدم اللي غيتشارك معاه
-            $table->enum('permission', ['view', 'edit'])->default('view'); // US-08: مستوى الوصول
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->enum('permission', ['view', 'edit'])->default('view'); 
             $table->timestamps();
         });
     }

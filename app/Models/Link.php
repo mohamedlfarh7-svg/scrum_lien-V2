@@ -52,4 +52,10 @@ class Link extends Model
             ]);
         });
     }
-}
+    public function sharedWith()
+    {
+        return $this->belongsToMany(User::class, 'link_user')
+                    ->withPivot('permission')
+                    ->withTimestamps();
+    }
+    }
